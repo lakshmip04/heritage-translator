@@ -22,6 +22,7 @@ export interface Translation {
   detected_script: string | null;
   confidence: number;
   audio_generated: boolean;
+  audio_url: string | null;
   created_at: string;
 }
 
@@ -31,7 +32,7 @@ export interface OCRResult {
   confidence: number;
 }
 
-export const mockOCR = (filename: string): OCRResult => {
+export const mockOCR = (): OCRResult => {
   const scripts = [
     { text: 'வாழ்க தமிழ் மொழி வாழ்க அறிவுடைமை', script: 'Tamil', confidence: 0.94 },
     { text: 'ಭಾರತ ದೇಶದ ಪ್ರಾಚೀನ ಲಿಪಿ', script: 'Kannada', confidence: 0.89 },
@@ -98,8 +99,8 @@ export const uploadFile = async (file: File): Promise<Upload> => {
 };
 
 export const processImage = async (uploadId: string, targetLang: string): Promise<Translation> => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not authenticated');
 
   const { data: upload } = await supabase
     .from('uploads')
@@ -109,25 +110,34 @@ export const processImage = async (uploadId: string, targetLang: string): Promis
 
   if (!upload) throw new Error('Upload not found');
 
-  const ocrResult = mockOCR(upload.filename);
-  const translatedText = await translateText(ocrResult.ocr_text, targetLang);
+  const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process_text`;
+
+  const response = await fetch(functionUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      image_url: upload.file_path,
+      target_language: targetLang,
+      upload_id: uploadId,
+    }),
+  });
+
+  const result = await response.json();
+
+  if (!result.success) {
+    throw new Error(result.error || 'Processing failed');
+  }
 
   const { data, error } = await supabase
     .from('translations')
-    .insert({
-      user_id: user.id,
-      upload_id: uploadId,
-      ocr_text: ocrResult.ocr_text,
-      translation: translatedText,
-      language: targetLang,
-      detected_script: ocrResult.detected_script,
-      confidence: ocrResult.confidence,
-      audio_generated: false,
-    })
-    .select()
-    .single();
+    .select('*')
+    .eq('id', result.translation_id)
+    .maybeSingle();
 
-  if (error) throw error;
+  if (error || !data) throw new Error('Failed to fetch translation');
   return data;
 };
 
@@ -146,6 +156,34 @@ export const getHistory = async (): Promise<(Translation & { upload: Upload })[]
 
   if (error) throw error;
   return data as any;
+};
+
+export const generateAudio = async (text: string, language: string, translationId: string): Promise<string> => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not authenticated');
+
+  const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate_audio`;
+
+  const response = await fetch(functionUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      text,
+      language,
+      translation_id: translationId,
+    }),
+  });
+
+  const result = await response.json();
+
+  if (!result.success) {
+    throw new Error(result.error || 'Audio generation failed');
+  }
+
+  return result.audio_url;
 };
 
 export const updateAudioGenerated = async (translationId: string): Promise<void> => {

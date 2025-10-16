@@ -25,10 +25,15 @@ export const HistoryPage: React.FC = () => {
     }
   };
 
-  const playAudio = (text: string) => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.9;
-    window.speechSynthesis.speak(utterance);
+  const playAudio = (text: string, audioUrl?: string | null) => {
+    if (audioUrl) {
+      const audio = new Audio(audioUrl);
+      audio.play();
+    } else {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.9;
+      window.speechSynthesis.speak(utterance);
+    }
   };
 
   if (loading) {
@@ -89,7 +94,7 @@ export const HistoryPage: React.FC = () => {
                   </div>
                   {item.audio_generated && (
                     <button
-                      onClick={() => playAudio(item.translation)}
+                      onClick={() => playAudio(item.translation, item.audio_url)}
                       className="bg-amber-100 hover:bg-amber-200 text-amber-700 p-3 rounded-xl transition"
                       title="Play audio"
                     >

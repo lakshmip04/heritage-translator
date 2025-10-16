@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FileText, Loader, Languages } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { processImage, Upload } from '../services/api';
+import { useToast } from '../components/Toast';
 
 export const ProcessPage: React.FC = () => {
   const [uploads, setUploads] = useState<Upload[]>([]);
@@ -10,6 +11,7 @@ export const ProcessPage: React.FC = () => {
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
+  const { showToast } = useToast();
 
   useEffect(() => {
     loadUploads();
@@ -41,10 +43,14 @@ export const ProcessPage: React.FC = () => {
     setResult(null);
 
     try {
+      showToast('Processing image...', 'info');
       const translation = await processImage(selectedUpload, targetLang);
       setResult(translation);
+      showToast('Translation completed successfully!', 'success');
     } catch (err: any) {
-      setError(err.message || 'Processing failed');
+      const errorMsg = err.message || 'Processing failed';
+      setError(errorMsg);
+      showToast(errorMsg, 'error');
     } finally {
       setProcessing(false);
     }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Upload as UploadIcon, Image as ImageIcon, CheckCircle } from 'lucide-react';
 import { uploadFile } from '../services/api';
+import { useToast } from '../components/Toast';
 
 export const UploadPage: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -8,6 +9,7 @@ export const UploadPage: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
+  const { showToast } = useToast();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -33,13 +35,16 @@ export const UploadPage: React.FC = () => {
     try {
       await uploadFile(file);
       setSuccess(true);
+      showToast('Image uploaded successfully!', 'success');
       setTimeout(() => {
         setFile(null);
         setPreview('');
         setSuccess(false);
       }, 3000);
     } catch (err: any) {
-      setError(err.message || 'Upload failed');
+      const errorMsg = err.message || 'Upload failed';
+      setError(errorMsg);
+      showToast(errorMsg, 'error');
     } finally {
       setUploading(false);
     }

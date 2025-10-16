@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Volume2, Play, Pause, Download, Loader } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Translation, updateAudioGenerated } from '../services/api';
+import { Translation, generateAudio } from '../services/api';
+import { useToast } from '../components/Toast';
 
 export const AudioPage: React.FC = () => {
   const [translations, setTranslations] = useState<Translation[]>([]);
@@ -9,10 +10,21 @@ export const AudioPage: React.FC = () => {
   const [playing, setPlaying] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
+  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const { showToast } = useToast();
 
   useEffect(() => {
     loadTranslations();
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (audioElement) {
+        audioElement.pause();
+        audioElement.src = '';
+      }
+    };
+  }, [audioElement]);
 
   const loadTranslations = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -41,24 +53,38 @@ export const AudioPage: React.FC = () => {
     setError('');
 
     try {
-      const utterance = new SpeechSynthesisUtterance(selectedData.translation);
-      utterance.rate = 0.9;
-      utterance.pitch = 1;
-      utterance.volume = 1;
+      showToast('Generating audio with Google TTS...', 'info');
+      const audioUrl = await generateAudio(
+        selectedData.translation,
+        selectedData.language,
+        selectedData.id
+      );
 
-      utterance.onstart = () => setPlaying(true);
-      utterance.onend = () => setPlaying(false);
-      utterance.onerror = () => {
+      const audio = new Audio(audioUrl);
+      audio.onplay = () => setPlaying(true);
+      audio.onended = () => setPlaying(false);
+      audio.onerror = () => {
         setPlaying(false);
-        setError('Audio generation failed');
+        setError('Audio playback failed');
+        showToast('Audio playback failed', 'error');
       };
 
-      window.speechSynthesis.speak(utterance);
+      setAudioElement(audio);
+      audio.play();
 
-      await updateAudioGenerated(selectedTranslation);
       await loadTranslations();
+      showToast('Audio generated successfully!', 'success');
     } catch (err: any) {
-      setError(err.message || 'Audio generation failed');
+      const errorMsg = err.message || 'Audio generation failed';
+      setError(errorMsg);
+      showToast(errorMsg, 'error');
+
+      const utterance = new SpeechSynthesisUtterance(selectedData.translation);
+      utterance.rate = 0.9;
+      utterance.onstart = () => setPlaying(true);
+      utterance.onend = () => setPlaying(false);
+      window.speechSynthesis.speak(utterance);
+      showToast('Using browser TTS as fallback', 'info');
     } finally {
       setGenerating(false);
     }
@@ -66,32 +92,54 @@ export const AudioPage: React.FC = () => {
 
   const handlePlayPause = () => {
     if (playing) {
-      window.speechSynthesis.cancel();
-      setPlaying(false);
+      if (audioElement) {
+        audioElement.pause();
+        setPlaying(false);
+      } else {
+        window.speechSynthesis.cancel();
+        setPlaying(false);
+      }
     } else {
-      handleGenerateAudio();
+      if (selectedData?.audio_url) {
+        const audio = new Audio(selectedData.audio_url);
+        audio.onplay = () => setPlaying(true);
+        audio.onended = () => setPlaying(false);
+        setAudioElement(audio);
+        audio.play();
+      } else {
+        handleGenerateAudio();
+      }
     }
   };
 
   const handleDownload = () => {
     if (!selectedData) return;
 
-    const dataStr = JSON.stringify(
-      {
-        text: selectedData.translation,
-        language: selectedData.language,
-        timestamp: new Date().toISOString(),
-      },
-      null,
-      2
-    );
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `translation-${Date.now()}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    if (selectedData.audio_url) {
+      const link = document.createElement('a');
+      link.href = selectedData.audio_url;
+      link.download = `audio-${Date.now()}.mp3`;
+      link.click();
+      showToast('Audio download started', 'success');
+    } else {
+      const dataStr = JSON.stringify(
+        {
+          text: selectedData.translation,
+          language: selectedData.language,
+          timestamp: new Date().toISOString(),
+        },
+        null,
+        2
+      );
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `translation-${Date.now()}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast('Translation downloaded as JSON', 'success');
+    }
   };
 
   return (
